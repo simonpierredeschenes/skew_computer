@@ -125,7 +125,9 @@ void lidarCallback(const sensor_msgs::PointCloud2& msg)
 			PM::OutlierWeights outlierWeights(icp.outlierFilters.compute(cloud, stillCloud, matches));
 			float residual = icp.errorMinimizer->getResidualError(cloud, stillCloud, outlierWeights, matches);
 			
-			residualPublisher.publish(residual);
+			std_msgs::Float32 residualMsg;
+			residualMsg.data = residual;
+			residualPublisher.publish(residualMsg);
 			
 			if(outputFile.is_open())
 			{
