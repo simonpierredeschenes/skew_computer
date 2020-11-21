@@ -29,8 +29,9 @@ PM::ICP icp;
 std::string sensorFrame;
 std::string odomFrame;
 std::unique_ptr<tf2_ros::Buffer> tfBuffer;
-std::ofstream outputFile;
+std::ofstream meanResidualFile;
 ros::Publisher residualPublisher;
+bool realTime;
 
 PM::TransformationParameters parseCloudPose(const std::string& cloudPoseString)
 {
@@ -122,16 +123,19 @@ void lidarCallback(const sensor_msgs::PointCloud2& msg)
 			
 			icp.matcher->init(stillCloud);
 			PM::Matches matches(icp.matcher->findClosests(cloud));
-			PM::OutlierWeights outlierWeights(icp.outlierFilters.compute(cloud, stillCloud, matches));
-			float residual = icp.errorMinimizer->getResidualError(cloud, stillCloud, outlierWeights, matches);
+			PM::Parameters params;
+			params["ratio"] = "1.0";
+			std::shared_ptr<PM::OutlierFilter> outlierFilter = PM::get().OutlierFilterRegistrar.create("TrimmedDistOutlierFilter", params);
+			PM::OutlierWeights outlierWeights = outlierFilter->compute(cloud, stillCloud, matches);
+			float meanResidual = icp.errorMinimizer->getResidualError(cloud, stillCloud, outlierWeights, matches) / cloud.getNbPoints();
 			
 			std_msgs::Float32 residualMsg;
-			residualMsg.data = residual;
+			residualMsg.data = meanResidual;
 			residualPublisher.publish(residualMsg);
 			
-			if(outputFile.is_open())
+			if(meanResidualFile.is_open())
 			{
-				outputFile << msg.header.stamp << "," << linearAcceleration << "," << angularSpeed << "," << residual << std::endl;
+				meanResidualFile << msg.header.stamp << "," << linearAcceleration << "," << angularSpeed << "," << meanResidual << std::endl;
 			}
 		}
 		else
@@ -178,6 +182,11 @@ void lidarCallback(const sensor_msgs::PointCloud2& msg)
 				ROS_INFO("Beginning still sequence!");
 				startOfStillSequence = msg.header.stamp;
 			}
+		}
+		
+		if(!realTime)
+		{
+			ROS_INFO_STREAM("Processed message with stamp " + std::to_string(msg.header.stamp.sec) + "." + std::to_string(msg.header.stamp.nsec) + ".");
 		}
 	}
 	catch(tf2::TransformException& ex)
@@ -228,26 +237,41 @@ int main(int argc, char** argv)
 	pnh.param<std::string>("sensor_frame", sensorFrame, "rslidar32");
 	pnh.param<std::string>("odom_frame", odomFrame, "odom");
 	
-	std::string outputFileName;
-	if(pnh.getParam("output_file_name", outputFileName))
+	std::string meanResidualFileName;
+	if(pnh.getParam("mean_residual_file_name", meanResidualFileName))
 	{
-		outputFile.open(outputFileName);
-		outputFile.close();
-		outputFile.open(outputFileName, std::ios::app);
-		outputFile << "stamp,linear_acceleration,angular_speed,residual" << std::endl;
+		meanResidualFile.open(meanResidualFileName);
+		meanResidualFile.close();
+		meanResidualFile.open(meanResidualFileName, std::ios::app);
+		meanResidualFile << "stamp,linear_acceleration,angular_speed,residual" << std::endl;
 	}
 	
-	tfBuffer = std::unique_ptr<tf2_ros::Buffer>(new tf2_ros::Buffer);
+	pnh.param<bool>("real_time", realTime, true);
+	
+	if(realTime)
+	{
+		tfBuffer = std::unique_ptr<tf2_ros::Buffer>(new tf2_ros::Buffer);
+	}
+	else
+	{
+		tfBuffer = std::unique_ptr<tf2_ros::Buffer>(new tf2_ros::Buffer(ros::DURATION_MAX));
+	}
 	tf2_ros::TransformListener tfListener(*tfBuffer);
 	
-	ros::Subscriber sub1 = nh.subscribe("cloud_topic", 1, lidarCallback);
-	ros::Subscriber sub2 = nh.subscribe("acceleration_topic", 1, imuCallback);
+	int subscriberQueueSize = 0;
+	if(realTime)
+	{
+		subscriberQueueSize = 1;
+	}
+	
+	ros::Subscriber sub1 = nh.subscribe("cloud_topic", subscriberQueueSize, lidarCallback);
+	ros::Subscriber sub2 = nh.subscribe("acceleration_topic", subscriberQueueSize, imuCallback);
 	
 	residualPublisher = nh.advertise<std_msgs::Float32>("residual", 1);
 	
 	ros::spin();
 	
-	outputFile.close();
+	meanResidualFile.close();
 	
 	return 0;
 }

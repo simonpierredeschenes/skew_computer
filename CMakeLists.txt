@@ -16,7 +16,6 @@ find_package(catkin REQUIRED COMPONENTS
 )
 
 ## System dependencies are found with CMake's conventions
-find_package(Boost COMPONENTS system filesystem REQUIRED)
 find_package(libpointmatcher REQUIRED)
 
 ## Uncomment this if the package has a setup.py. This macro ensures
@@ -152,8 +151,6 @@ add_executable(${PROJECT_NAME}_node src/skew_computer_node.cpp)
 target_link_libraries(${PROJECT_NAME}_node
   ${catkin_LIBRARIES}
   ${libpointmatcher_LIBRARIES}
-  ${Boost_FILESYSTEM_LIBRARY}
-  ${Boost_SYSTEM_LIBRARY}
 )
 
 #############
